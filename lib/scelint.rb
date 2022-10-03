@@ -8,8 +8,14 @@ require 'scelint/version'
 
 module Scelint
   class Error < StandardError; end
-  # Your code goes here...
 
+  # Checks SCE data in the specified directories
+  # @example Look for data in the current directory (the default)
+  #    lint = Scelint::Lint.new()
+  # @example Look for data in `/path/to/module`
+  #    lint = Scelint::Lint.new('/path/to/module')
+  # @example Look for data in all modules in the current directory
+  #    lint = Scelint::Lint.new(Dir.glob('*'))
   class Lint
     def initialize(paths = ['.'])
       @data = {}
@@ -46,7 +52,7 @@ module Scelint
         lint(file, data)
       end
 
-      @data
+      @data # rubocop:disable Lint/Void
     end
 
     def parse(file)
@@ -58,25 +64,26 @@ module Scelint
              when %r{\.json$}
                'json'
              else
+               @errors << "#{file}: Failed to determine file type"
                nil
              end
-      return YAML.safe_load(File.read(file)) if type == 'yaml'
-      return JSON.parse(File.read(file)) if type == 'json'
+      begin
+        return YAML.safe_load(File.read(file)) if type == 'yaml'
+        return JSON.parse(File.read(file)) if type == 'json'
+      rescue => e
+        @errors << "#{file}: Failed to parse file: #{e.message}"
+      end
 
-      raise "Failed to determine file type of '#{file}'"
+      {}
     end
 
     def files
       @data.keys - ['merged data']
     end
 
-    def warnings
-      @warnings
-    end
+    attr_reader :warnings
 
-    def errors
-      @errors
-    end
+    attr_reader :errors
 
     def check_version(file, data)
       @errors << "#{file}: version check failed" unless data['version'] == '2.0.0'
@@ -91,7 +98,7 @@ module Scelint
         'controls',
       ]
 
-      data.keys.each do |key|
+      data.each_key do |key|
         @warnings << "#{file}: unexpected key '#{key}'" unless ok.include?(key)
       end
     end
@@ -185,7 +192,7 @@ module Scelint
       ]
 
       data.each do |profile, value|
-        value.keys.each do |key|
+        value.each_key do |key|
           @warnings << "#{file} (profile '#{profile}'): unexpected key '#{key}'" unless ok.include?(key)
         end
 
@@ -211,7 +218,7 @@ module Scelint
       ]
 
       data.each do |ce, value|
-        value.keys.each do |key|
+        value.each_key do |key|
           @warnings << "#{file} (CE '#{ce}'): unexpected key '#{key}'" unless ok.include?(key)
         end
 
@@ -234,19 +241,18 @@ module Scelint
     end
 
     def check_remediation(file, check, remediation_section)
-      
       reason_ok = [
-        'reason'
+        'reason',
       ]
 
       risk_ok = [
         'level',
-        'reason'
+        'reason',
       ]
 
       if remediation_section.is_a?(Hash)
         remediation_section.each do |section, value|
-          #require 'pry-byebug'; binding.pry if section == 'disabled'
+          # require 'pry-byebug'; binding.pry if section == 'disabled'
           case section
           when 'scan-false-positive', 'disabled'
             value.each do |reason|
@@ -285,7 +291,7 @@ module Scelint
       end
     end
 
-    def check_value(file, check, value)
+    def check_value(_file, _check, _value)
       # value could be anything
       true
     end
@@ -310,7 +316,7 @@ module Scelint
         @errors << "#{file} (check '#{check}'): missing parameter"
       end
 
-      data.keys.each do |key|
+      data.each_key do |key|
         @warnings << "#{file} (check '#{check}'): unexpected key '#{key}'" unless ok.include?(key)
       end
     end
@@ -332,7 +338,7 @@ module Scelint
         'oval-ids',
         'ces',
         'confine',
-        'remediation'
+        'remediation',
       ]
 
       data.each do |check, value|
@@ -342,7 +348,7 @@ module Scelint
         end
 
         if value.is_a?(Hash)
-          value.keys.each do |key|
+          value.each_key do |key|
             @warnings << "#{file} (check '#{check}'): unexpected key '#{key}'" unless ok.include?(key)
           end
         else
@@ -351,7 +357,9 @@ module Scelint
 
         check_type(file, check, value['type']) if value['type'] || file == 'merged data'
         check_settings(file, check, value['settings']) if value['settings'] || file == 'merged data'
-        check_remediation(file, check, value['remediation']) if value['remediation'] unless value['remediation'].nil?
+        unless value['remediation'].nil?
+          check_remediation(file, check, value['remediation']) if value['remediation']
+        end
         check_controls(file, value['controls']) unless value['controls'].nil?
         check_identifiers(file, value['identifiers']) unless value['identifiers'].nil?
         check_oval_ids(file, value['oval-ids']) unless value['oval-ids'].nil?
